@@ -91,8 +91,7 @@ function openImportModal() {
 }
 
 /**
- * 1-2. JSON解析とDBへの書き込み (サーバー側処理)
- * ★修正版：ARRAYFORMULA保護 + トースト通知追加
+ * 1-2. JSON解析とDBへの書き込み (ガントチャート対応版)
  */
 function processAiPlan(jsonString) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -100,11 +99,10 @@ function processAiPlan(jsonString) {
   const sheetProcess = ss.getSheetByName(CONFIG.SHEET_PROCESS);
 
   try {
-    // JSONパース
     const planData = JSON.parse(jsonString);
     if (!Array.isArray(planData)) throw new Error("JSONは配列形式である必要があります");
 
-    // --- A. Process_DB の更新 ---
+    // --- A. Process_DB 更新 ---
     const existProcs = sheetProcess.getRange("A2:A").getValues().flat().filter(String);
     const newProcesses = [];
     const seenProcIds = new Set(existProcs);
@@ -121,7 +119,7 @@ function processAiPlan(jsonString) {
       sheetProcess.getRange(lastRowP + 1, 1, newProcesses.length, 3).setValues(newProcesses);
     }
 
-    // --- B. Task_DB の更新 ---
+    // --- B. Task_DB 更新 ---
     const existTaskIds = sheetTask.getRange("B2:B").getValues().flat();
     let maxId = 0;
     existTaskIds.forEach(id => {
@@ -131,38 +129,38 @@ function processAiPlan(jsonString) {
       }
     });
 
-    // 書き込み用配列を2つに分ける（C列をまたぐため）
-    const newTasksPart1 = []; // A列(Process_ID), B列(Task_ID)
-    const newTasksPart2 = []; // D列(Task_Name) 〜 J列(Notify)
+    const newTasksPart1 = []; // A-B列
+    const newTasksPart2 = []; // D-J列
 
     planData.forEach((item, i) => {
       const nextId = maxId + i + 1;
       const taskId = 'TASK-' + ('000' + nextId).slice(-3);
       
       const today = new Date();
-      const start = new Date(today);
-      const due = new Date(today);
+      const start = new Date(today); // 開始日
+      const due = new Date(today);   // 期限日
+      
+      // デモ用: start_offsetがあれば開始日をずらす（なければ今日）
+      if (item.start_offset) start.setDate(today.getDate() + item.start_offset);
       if (item.due_offset) due.setDate(today.getDate() + item.due_offset);
 
-      // 前半: A, B列
       newTasksPart1.push([
-        item.process_id || "",      // A: Process_ID
-        taskId                      // B: Task_ID
+        item.process_id || "",      
+        taskId                      
       ]);
 
-      // 後半: D 〜 J列 (C列は飛ばす)
       newTasksPart2.push([
-        item.task_name || "",       // D: Task_Name
-        item.assignee_name || "",   // E: Assignee
-        "⚪️ 未着手",                // F: Status
-        item.est_hours || 1,        // G: Est_Hours
-        start,                      // H: Start
-        due,                        // I: Due
-        false                       // J: Notify
+        item.task_name || "",       
+        item.assignee_name || "",   
+        "⚪️ 未着手",                
+        item.est_hours || 1,        
+        start,                      
+        due,                        
+        false                       
       ]);
     });
 
-    // 書き込み開始行の特定
+    // 書き込み位置
     const valsA = sheetTask.getRange("A1:A").getValues().flat();
     let realLastRow = valsA.length;
     while (realLastRow > 0 && valsA[realLastRow - 1] === "") {
@@ -170,19 +168,16 @@ function processAiPlan(jsonString) {
     }
     const startRow = realLastRow + 1;
 
-    // 分割書き込み実行
     if (newTasksPart1.length > 0) {
       sheetTask.getRange(startRow, 1, newTasksPart1.length, 2).setValues(newTasksPart1);
       sheetTask.getRange(startRow, 4, newTasksPart2.length, 7).setValues(newTasksPart2);
     }
 
-    // ★追加機能：スプレッドシート右下にトースト通知を出す
     ss.toast(`タスク${newTasksPart1.length}件を取り込みました。`, "🤖 取り込み完了", 5);
-
-    return `✅ 成功！\nタスク ${newTasksPart1.length}件\nプロセス ${newProcesses.length}件\nを追加しました。`;
+    return `✅ 成功！\nタスク ${newTasksPart1.length}件を追加しました。`;
 
   } catch (e) {
-    throw e; // エラーはHTML側でキャッチさせるために投げる
+    throw e;
   }
 }
 
