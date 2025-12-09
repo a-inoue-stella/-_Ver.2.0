@@ -4,25 +4,24 @@
  */
 
 // --- 1. 設定 (CONFIG) ---
-// シートの列番号や設定値をここで一元管理します
+// ★修正：シート名を日本語版に合わせて変更
 const CONFIG = {
-  SHEET_TASK: 'Task_DB',
-  SHEET_PROCESS: 'Process_DB',
-  SHEET_DASHBOARD: 'Dashboard',
+  SHEET_TASK: 'タスク管理',
+  SHEET_PROCESS: '工程マスタ',
+  SHEET_DASHBOARD: 'ダッシュボード',
   
-  // Task_DBの列番号 (A列=1)
+  // 列番号 (A列=1) ※変更なし
   COL_PROCESS_ID: 1,
   COL_TASK_ID: 2,
   COL_PROCESS_NAME: 3,
   COL_TASK_NAME: 4,
   COL_ASSIGNEE: 5,
   COL_STATUS: 6,
-  COL_EST_HOURS: 7, // ★新規: 工数
+  COL_EST_HOURS: 7, 
   COL_START: 8,
   COL_DUE: 9,
-  COL_NOTIFY: 10,   // J列: 通知チェックボックス
+  COL_NOTIFY: 10,   
   
-  // DashboardのWebhook URL入力セル
   CELL_WEBHOOK: 'D2'
 };
 
