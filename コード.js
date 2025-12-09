@@ -42,7 +42,7 @@ function onOpen() {
    ========================================================================== */
 
 /**
- * 1-1. 入力用モーダルの表示
+ * 1-1. 入力用モーダルの表示 (修正版：完了通知機能付き)
  */
 function openImportModal() {
   const html = `
@@ -51,25 +51,48 @@ function openImportModal() {
       <p>Geminiが生成したJSONを貼り付けてください。</p>
       <textarea id="json" style="width:100%; height:300px; font-family:monospace;"></textarea>
       <br><br>
-      <button onclick="runImport()" style="padding:10px 20px; font-weight:bold; cursor:pointer;">取り込み実行</button>
+      <button id="btn" onclick="runImport()" style="padding:10px 20px; font-weight:bold; cursor:pointer;">取り込み実行</button>
       <div id="status" style="margin-top:10px; font-weight:bold;"></div>
       <script>
         function runImport() {
           const json = document.getElementById('json').value;
-          document.getElementById('status').innerText = '処理中...';
+          if (!json) {
+            alert("JSONが入力されていません");
+            return;
+          }
+          
+          // ボタンを無効化し、処理中表示にする
+          const btn = document.getElementById('btn');
+          const status = document.getElementById('status');
+          btn.disabled = true;
+          btn.innerText = "処理中...";
+          status.innerText = '🔄 スプレッドシートに書き込んでいます...少々お待ちください。';
+
           google.script.run
-            .withSuccessHandler(msg => document.getElementById('status').innerText = msg)
-            .withFailureHandler(err => document.getElementById('status').innerText = 'エラー: ' + err.message)
+            .withSuccessHandler(msg => {
+              // ★完了時の挙動：アラートを出して閉じる
+              status.innerText = '✅ 完了しました！';
+              window.alert(msg); // ポップアップ通知
+              google.script.host.close(); // モーダルを閉じる
+            })
+            .withFailureHandler(err => {
+              // エラー時はボタンを戻す
+              btn.disabled = false;
+              btn.innerText = "取り込み実行";
+              status.innerText = '❌ エラー: ' + err.message;
+              window.alert('エラーが発生しました:\\n' + err.message);
+            })
             .processAiPlan(json);
         }
       </script>
     </div>
   `;
-  SpreadsheetApp.getUi().showModalDialog(HtmlService.createHtmlOutput(html).setWidth(600).setHeight(500), 'AIプランナー連携');
+  SpreadsheetApp.getUi().showModalDialog(HtmlService.createHtmlOutput(html).setWidth(600).setHeight(550), 'AIプランナー連携');
 }
 
 /**
  * 1-2. JSON解析とDBへの書き込み (サーバー側処理)
+ * ★修正版：ARRAYFORMULA保護 + トースト通知追加
  */
 function processAiPlan(jsonString) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -77,12 +100,11 @@ function processAiPlan(jsonString) {
   const sheetProcess = ss.getSheetByName(CONFIG.SHEET_PROCESS);
 
   try {
-    // JSONパース（配列であることを期待）
+    // JSONパース
     const planData = JSON.parse(jsonString);
     if (!Array.isArray(planData)) throw new Error("JSONは配列形式である必要があります");
 
     // --- A. Process_DB の更新 ---
-    // 既存のプロセスIDを取得して重複を防ぐ
     const existProcs = sheetProcess.getRange("A2:A").getValues().flat().filter(String);
     const newProcesses = [];
     const seenProcIds = new Set(existProcs);
@@ -100,7 +122,6 @@ function processAiPlan(jsonString) {
     }
 
     // --- B. Task_DB の更新 ---
-    // Task_IDの最大値を取得して連番生成
     const existTaskIds = sheetTask.getRange("B2:B").getValues().flat();
     let maxId = 0;
     existTaskIds.forEach(id => {
@@ -110,53 +131,58 @@ function processAiPlan(jsonString) {
       }
     });
 
-    const newTasks = planData.map((item, i) => {
+    // 書き込み用配列を2つに分ける（C列をまたぐため）
+    const newTasksPart1 = []; // A列(Process_ID), B列(Task_ID)
+    const newTasksPart2 = []; // D列(Task_Name) 〜 J列(Notify)
+
+    planData.forEach((item, i) => {
       const nextId = maxId + i + 1;
       const taskId = 'TASK-' + ('000' + nextId).slice(-3);
       
-      // 日付計算 (今日 + offset)
       const today = new Date();
       const start = new Date(today);
       const due = new Date(today);
       if (item.due_offset) due.setDate(today.getDate() + item.due_offset);
 
-      return [
+      // 前半: A, B列
+      newTasksPart1.push([
         item.process_id || "",      // A: Process_ID
-        taskId,                     // B: Task_ID
-        "",                         // C: Process_Name (数式で自動表示)
+        taskId                      // B: Task_ID
+      ]);
+
+      // 後半: D 〜 J列 (C列は飛ばす)
+      newTasksPart2.push([
         item.task_name || "",       // D: Task_Name
         item.assignee_name || "",   // E: Assignee
         "⚪️ 未着手",                // F: Status
-        item.est_hours || 1,        // G: Est_Hours (工数)
+        item.est_hours || 1,        // G: Est_Hours
         start,                      // H: Start
         due,                        // I: Due
-        false,                      // J: Notify
-        ""                          // K: Gantt (数式)
-      ];
+        false                       // J: Notify
+      ]);
     });
 
-    // 書き込み（C列, K列は数式が入っている前提なので上書き注意だが、
-    // 今回のシート構築スクリプトではARRAYFORMULAを使っているため、
-    // 空欄を書き込んでも数式が生きる、もしくは値として書き込む）
-    // ※今回は値として書き込みます。C列はARRAYFORMULAが入っているので空文字でOK。
-    
-    // A列(Process_ID)の最終行を探して追記
-    const lastRowT = sheetTask.getLastRow(); 
-    // ※getLastRowはデータがある最終行。数式だけの行はカウントされない場合があるが、
-    // 配列渡しで書き込むため、正確な位置特定が必要。
-    // 安全のため、A列の値を見て最終行を判定
+    // 書き込み開始行の特定
     const valsA = sheetTask.getRange("A1:A").getValues().flat();
     let realLastRow = valsA.length;
     while (realLastRow > 0 && valsA[realLastRow - 1] === "") {
       realLastRow--;
     }
-    
-    sheetTask.getRange(realLastRow + 1, 1, newTasks.length, newTasks[0].length).setValues(newTasks);
+    const startRow = realLastRow + 1;
 
-    return `✅ 成功！ ${newTasks.length}件のタスクと${newProcesses.length}件のプロセスを追加しました。`;
+    // 分割書き込み実行
+    if (newTasksPart1.length > 0) {
+      sheetTask.getRange(startRow, 1, newTasksPart1.length, 2).setValues(newTasksPart1);
+      sheetTask.getRange(startRow, 4, newTasksPart2.length, 7).setValues(newTasksPart2);
+    }
+
+    // ★追加機能：スプレッドシート右下にトースト通知を出す
+    ss.toast(`タスク${newTasksPart1.length}件を取り込みました。`, "🤖 取り込み完了", 5);
+
+    return `✅ 成功！\nタスク ${newTasksPart1.length}件\nプロセス ${newProcesses.length}件\nを追加しました。`;
 
   } catch (e) {
-    return "❌ エラー: " + e.message;
+    throw e; // エラーはHTML側でキャッチさせるために投げる
   }
 }
 
