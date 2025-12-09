@@ -1,33 +1,43 @@
 /**
- * クオーレ様向けタスク管理ツール v2.0 構築スクリプト
- * ・Masterシートなし
- * ・「Dropdowns」シートを作成し、担当者リストをそこから参照する形式に変更
+ * クオーレ様向けタスク管理ツール v2.0 構築スクリプト（バインド版）
+ * 現在開いているスプレッドシートに対して、シート構成と設定を一括適用します。
+ * ※注意: 同名のシート（Dashboard等）が既にある場合、削除して作り直します。
  */
-function createV2DemoSheet_WithDropdown() {
-  // 1. 新規スプレッドシート作成
-  const ss = SpreadsheetApp.create("【デモv2.0】クオーレ様タスク管理ツール_プルダウン連携版");
-  const defaultSheet = ss.getSheets()[0];
-
-  // --- シートの作成 ---
-  const sheetDashboard = ss.insertSheet("Dashboard");
-  const sheetTaskDB = ss.insertSheet("Task_DB");
-  const sheetProcessDB = ss.insertSheet("Process_DB");
-  const sheetDropdowns = ss.insertSheet("Dropdowns"); // ★新規追加：プルダウン用シート
+function setupV2DemoSheet_Bound() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
   
-  // デフォルトの「シート1」を削除
-  ss.deleteSheet(defaultSheet);
+  // 作成するシート名の定義
+  const targetSheets = {
+    dashboard: "Dashboard",
+    taskDB: "Task_DB",
+    processDB: "Process_DB",
+    dropdowns: "Dropdowns"
+  };
+
+  // 1. 同名の既存シートがあれば削除 (リセット処理)
+  Object.values(targetSheets).forEach(name => {
+    const existing = ss.getSheetByName(name);
+    if (existing) {
+      ss.deleteSheet(existing);
+    }
+  });
+
+  // 2. シートの新規作成
+  const sheetDashboard = ss.insertSheet(targetSheets.dashboard);
+  const sheetTaskDB = ss.insertSheet(targetSheets.taskDB);
+  const sheetProcessDB = ss.insertSheet(targetSheets.processDB);
+  const sheetDropdowns = ss.insertSheet(targetSheets.dropdowns);
 
   // ==========================================
-  // 2. Dropdowns シート設定（担当者リスト置き場）
+  // 3. Dropdowns シート設定（担当者リスト置き場）
   // ==========================================
-  // 後でマスタから転記しやすいよう、A列を担当者リスト枠として空けておきます
   sheetDropdowns.getRange("A1").setValue("【担当者リスト】(マスタから転記)").setFontWeight("bold").setBackground("#d9ead3");
-  // デモ用に仮のデータを入れておきます（後で上書きしてください）
+  // デモ用仮データ
   const initialAssignees = [["本田 啓夫"], ["佐藤 料理長"], ["鈴木 買出"], ["AI アシスタント"]];
   sheetDropdowns.getRange(2, 1, initialAssignees.length, 1).setValues(initialAssignees);
 
   // ==========================================
-  // 3. Process_DB シート設定（工程マスタ）
+  // 4. Process_DB シート設定（工程マスタ）
   // ==========================================
   const processHeaders = ["Process_ID", "Process_Name", "Description"];
   const processData = [
@@ -42,7 +52,7 @@ function createV2DemoSheet_WithDropdown() {
   sheetProcessDB.getRange(2, 1, processData.length, processData[0].length).setValues(processData);
 
   // ==========================================
-  // 4. Task_DB シート設定（メイン入力画面）
+  // 5. Task_DB シート設定（メイン入力画面）
   // ==========================================
   const taskHeaders = [
     "Process_ID", "Task_ID", "Process_Name", "Task_Name", 
@@ -55,11 +65,11 @@ function createV2DemoSheet_WithDropdown() {
   sheetTaskDB.setColumnWidth(4, 250); 
   sheetTaskDB.setColumnWidth(11, 200);
 
-  // --- 入力規則 (プルダウン) の設定 ---
+  // --- 入力規則 (プルダウン) ---
   
-  // E列: Assignee (★変更点：DropdownsシートのA列を参照するように設定)
+  // E列: Assignee (DropdownsシートのA列を参照)
   const ruleAssignee = SpreadsheetApp.newDataValidation()
-    .requireValueInRange(sheetDropdowns.getRange("A2:A")) // A列全体を範囲指定
+    .requireValueInRange(sheetDropdowns.getRange("A2:A"))
     .setAllowInvalid(true).build();
   sheetTaskDB.getRange("E2:E100").setDataValidation(ruleAssignee);
 
@@ -75,15 +85,17 @@ function createV2DemoSheet_WithDropdown() {
     .build();
   sheetTaskDB.getRange("J2:J100").setDataValidation(ruleCheck);
 
-  // --- 数式の設定 ---
+  // --- 数式 (VLOOKUP, SPARKLINE) ---
   // C列: Process_Name
   sheetTaskDB.getRange("C2").setFormula('=ARRAYFORMULA(IFERROR(VLOOKUP(A2:A, Process_DB!A:B, 2, FALSE), ""))');
 
   // K列: 簡易ガントチャート
   sheetTaskDB.getRange("K2").setFormula('=ARRAYFORMULA(IF((I2:I="")+(I2:I<TODAY()), "", SPARKLINE(I2:I-TODAY(), {"charttype","bar";"max",30;"min",0;"color1","#6aa84f"})))');
 
-  // --- 条件付き書式の設定 ---
+  // --- 条件付き書式 ---
   const rangeAll = sheetTaskDB.getRange("A2:K100");
+  
+  // 1. 完了行グレーアウト
   const ruleGray = SpreadsheetApp.newConditionalFormatRule()
     .whenFormulaSatisfied('=$F2="🟢 完了"')
     .setBackground("#EFEFEF")
@@ -91,6 +103,7 @@ function createV2DemoSheet_WithDropdown() {
     .setRanges([rangeAll])
     .build();
   
+  // 2. プロセスID区切り (背景色変更)
   const ruleProcessGroup = SpreadsheetApp.newConditionalFormatRule()
     .whenFormulaSatisfied('=$A2<>$A1') 
     .setBackground("#fff2cc") 
@@ -106,7 +119,7 @@ function createV2DemoSheet_WithDropdown() {
   sheetTaskDB.setFrozenColumns(4);
 
   // ==========================================
-  // 5. Dashboard シート設定
+  // 6. Dashboard シート設定
   // ==========================================
   sheetDashboard.getRange("A1").setValue("【リソース負荷状況】(未完了タスクの工数合計)");
   sheetDashboard.getRange("A2").setFormula('=QUERY(Task_DB!E:G, "select E, sum(G) where F != \'🟢 完了\' and E is not null group by E label sum(G) \'残工数(h)\'", 1)');
@@ -118,5 +131,27 @@ function createV2DemoSheet_WithDropdown() {
   sheetDashboard.getRange("D5").setFormula('=COUNTIFS(Task_DB!I:I, "<"&TODAY(), Task_DB!F:F, "<>🟢 完了")');
   sheetDashboard.getRange("D5").setFontColor("red").setFontWeight("bold").setFontSize(14);
 
-  Logger.log("作成完了URL: " + ss.getUrl());
+  // ==========================================
+  // 7. 不要シートの掃除
+  // ==========================================
+  // 作成した4シート以外（元々あった「シート1」など）を削除
+  const createdSheetNames = Object.values(targetSheets);
+  const allSheets = ss.getSheets();
+  
+  if (allSheets.length > createdSheetNames.length) {
+    allSheets.forEach(sheet => {
+      if (!createdSheetNames.includes(sheet.getName())) {
+        try {
+          ss.deleteSheet(sheet);
+        } catch (e) {
+          // 削除エラー（最後の1枚など）は無視
+          console.log("シート削除スキップ: " + sheet.getName());
+        }
+      }
+    });
+  }
+
+  // Dashboardをアクティブにする
+  ss.setActiveSheet(sheetDashboard);
+  Browser.msgBox("✅ シート構築が完了しました！");
 }
