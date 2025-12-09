@@ -1,44 +1,18 @@
 /**
- * クオーレ様向けタスク管理ツール v2.0 構築スクリプト（バインド版）
- * 現在開いているスプレッドシートに対して、シート構成と設定を一括適用します。
- * ※注意: 同名のシート（Dashboard等）が既にある場合、削除して作り直します。
+ * 【v2.1】クオーレ様向けタスク管理ツール構築 (本格ガントチャート版)
+ * K列以降に日付を展開し、条件付き書式で期間を塗りつぶします。
  */
-function setupV2DemoSheet_Bound() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+function createV2DemoSheet_Gantt() {
+  const ss = SpreadsheetApp.create("【デモv2.1】クオーレ様タスク管理ツール_ガントチャート版");
+  const defaultSheet = ss.getSheets()[0];
+
+  const sheetDashboard = ss.insertSheet("Dashboard");
+  const sheetTaskDB = ss.insertSheet("Task_DB");
+  const sheetProcessDB = ss.insertSheet("Process_DB");
   
-  // 作成するシート名の定義
-  const targetSheets = {
-    dashboard: "Dashboard",
-    taskDB: "Task_DB",
-    processDB: "Process_DB",
-    dropdowns: "Dropdowns"
-  };
+  ss.deleteSheet(defaultSheet);
 
-  // 1. 同名の既存シートがあれば削除 (リセット処理)
-  Object.values(targetSheets).forEach(name => {
-    const existing = ss.getSheetByName(name);
-    if (existing) {
-      ss.deleteSheet(existing);
-    }
-  });
-
-  // 2. シートの新規作成
-  const sheetDashboard = ss.insertSheet(targetSheets.dashboard);
-  const sheetTaskDB = ss.insertSheet(targetSheets.taskDB);
-  const sheetProcessDB = ss.insertSheet(targetSheets.processDB);
-  const sheetDropdowns = ss.insertSheet(targetSheets.dropdowns);
-
-  // ==========================================
-  // 3. Dropdowns シート設定（担当者リスト置き場）
-  // ==========================================
-  sheetDropdowns.getRange("A1").setValue("【担当者リスト】(マスタから転記)").setFontWeight("bold").setBackground("#d9ead3");
-  // デモ用仮データ
-  const initialAssignees = [["本田 啓夫"], ["佐藤 料理長"], ["鈴木 買出"], ["AI アシスタント"]];
-  sheetDropdowns.getRange(2, 1, initialAssignees.length, 1).setValues(initialAssignees);
-
-  // ==========================================
-  // 4. Process_DB シート設定（工程マスタ）
-  // ==========================================
+  // --- Process_DB 設定 ---
   const processHeaders = ["Process_ID", "Process_Name", "Description"];
   const processData = [
     ["P-01", "買出し", "食材や備品の調達フェーズ"],
@@ -46,112 +20,104 @@ function setupV2DemoSheet_Bound() {
     ["P-03", "調理", "加熱調理プロセス"],
     ["P-04", "盛り付け", "提供前の最終仕上げ"]
   ];
-
   sheetProcessDB.getRange(1, 1, 1, processHeaders.length).setValues([processHeaders])
     .setFontWeight("bold").setBackground("#cfe2f3");
   sheetProcessDB.getRange(2, 1, processData.length, processData[0].length).setValues(processData);
 
-  // ==========================================
-  // 5. Task_DB シート設定（メイン入力画面）
-  // ==========================================
-  const taskHeaders = [
+  // --- Task_DB 設定 ---
+  const fixedHeaders = [
     "Process_ID", "Task_ID", "Process_Name", "Task_Name", 
-    "Assignee", "Status", "Est_Hours", "Start_Date", "Due_Date", "Notify", "Gantt"
+    "Assignee", "Status", "Est_Hours", "Start_Date", "Due_Date", "Notify"
   ];
   
-  sheetTaskDB.getRange(1, 1, 1, taskHeaders.length).setValues([taskHeaders])
+  // 固定列のヘッダーセット
+  sheetTaskDB.getRange(1, 1, 1, fixedHeaders.length).setValues([fixedHeaders])
     .setFontWeight("bold").setBackground("#4c1130").setFontColor("white");
   
-  sheetTaskDB.setColumnWidth(4, 250); 
-  sheetTaskDB.setColumnWidth(11, 200);
+  // ★変更点：K列以降に「日付ヘッダー」を展開 (今日から60日分)
+  const today = new Date();
+  const dateHeaders = [];
+  for (let i = 0; i < 60; i++) {
+    const d = new Date(today);
+    d.setDate(today.getDate() + i);
+    dateHeaders.push(d);
+  }
+  // K1セルから日付を書き込み
+  sheetTaskDB.getRange(1, 11, 1, dateHeaders.length) // 11列目(K列)から
+    .setValues([dateHeaders])
+    .setNumberFormat("M/d") // 日付フォーマット
+    .setBackground("#f3f3f3")
+    .setFontColor("black")
+    .setFontWeight("bold")
+    .setHorizontalAlignment("center");
 
-  // --- 入力規則 (プルダウン) ---
-  
-  // E列: Assignee (DropdownsシートのA列を参照)
-  const ruleAssignee = SpreadsheetApp.newDataValidation()
-    .requireValueInRange(sheetDropdowns.getRange("A2:A"))
-    .setAllowInvalid(true).build();
+  // 列幅調整
+  sheetTaskDB.setColumnWidth(4, 250); // Task_Name
+  sheetTaskDB.setColumnWidths(11, 60, 25); // ガントチャートエリアを狭く(25px)して見やすく
+
+  // --- 入力規則 ---
+  const demoAssignees = ["本田 啓夫", "佐藤 料理長", "鈴木 買出", "AI アシスタント"];
+  const ruleAssignee = SpreadsheetApp.newDataValidation().requireValueInList(demoAssignees).setAllowInvalid(true).build();
   sheetTaskDB.getRange("E2:E100").setDataValidation(ruleAssignee);
 
-  // F列: Status (固定リスト)
-  const ruleStatus = SpreadsheetApp.newDataValidation()
-    .requireValueInList(["⚪️ 未着手", "🔵 進行中", "🟢 完了", "🟡 確認待ち"])
-    .setAllowInvalid(true).build();
+  const ruleStatus = SpreadsheetApp.newDataValidation().requireValueInList(["⚪️ 未着手", "🔵 進行中", "🟢 完了", "🟡 確認待ち"]).setAllowInvalid(true).build();
   sheetTaskDB.getRange("F2:F100").setDataValidation(ruleStatus);
 
-  // J列: Notify (チェックボックス)
-  const ruleCheck = SpreadsheetApp.newDataValidation()
-    .requireCheckbox()
-    .build();
+  const ruleCheck = SpreadsheetApp.newDataValidation().requireCheckbox().build();
   sheetTaskDB.getRange("J2:J100").setDataValidation(ruleCheck);
 
-  // --- 数式 (VLOOKUP, SPARKLINE) ---
-  // C列: Process_Name
+  // --- 数式 ---
   sheetTaskDB.getRange("C2").setFormula('=ARRAYFORMULA(IFERROR(VLOOKUP(A2:A, Process_DB!A:B, 2, FALSE), ""))');
 
-  // K列: 簡易ガントチャート
-  sheetTaskDB.getRange("K2").setFormula('=ARRAYFORMULA(IF((I2:I="")+(I2:I<TODAY()), "", SPARKLINE(I2:I-TODAY(), {"charttype","bar";"max",30;"min",0;"color1","#6aa84f"})))');
+  // --- 条件付き書式 (ガントチャートの描画) ---
+  const rules = sheetTaskDB.getConditionalFormatRules();
 
-  // --- 条件付き書式 ---
-  const rangeAll = sheetTaskDB.getRange("A2:K100");
-  
-  // 1. 完了行グレーアウト
+  // 1. ガントチャートバー (期間塗りつぶし)
+  // 範囲: K2:BM100 (日付エリア)
+  // 条件: カレンダーの日付(K$1)が、開始日($H2)以上 かつ 期限($I2)以下 の場合
+  const ganttRange = sheetTaskDB.getRange(2, 11, 100, 60);
+  const ruleGantt = SpreadsheetApp.newConditionalFormatRule()
+    .whenFormulaSatisfied('=AND(K$1>=$H2, K$1<=$I2)')
+    .setBackground("#6aa84f") // 緑色
+    .setRanges([ganttRange])
+    .build();
+  rules.push(ruleGantt);
+
+  // 2. 今日線 (縦ライン)
+  const ruleToday = SpreadsheetApp.newConditionalFormatRule()
+    .whenFormulaSatisfied('=K$1=TODAY()')
+    .setBackground("#fff2cc") // 薄い黄色
+    .setRanges([ganttRange])
+    .build();
+  rules.push(ruleToday);
+
+  // 3. 完了行グレーアウト (全体)
   const ruleGray = SpreadsheetApp.newConditionalFormatRule()
     .whenFormulaSatisfied('=$F2="🟢 完了"')
     .setBackground("#EFEFEF")
     .setFontColor("#999999")
-    .setRanges([rangeAll])
+    .setRanges([sheetTaskDB.getRange("A2:BM100")])
     .build();
-  
-  // 2. プロセスID区切り (背景色変更)
-  const ruleProcessGroup = SpreadsheetApp.newConditionalFormatRule()
-    .whenFormulaSatisfied('=$A2<>$A1') 
-    .setBackground("#fff2cc") 
-    .setRanges([sheetTaskDB.getRange("A2:K100")])
-    .build();
-
-  const rules = sheetTaskDB.getConditionalFormatRules();
   rules.push(ruleGray);
+
+  // 4. プロセス区切り
+  const ruleProcessGroup = SpreadsheetApp.newConditionalFormatRule()
+    .whenFormulaSatisfied('=$A2<>$A1')
+    .setBackground("#e6b8af") // 少し濃い色で区切り
+    .setRanges([sheetTaskDB.getRange("A2:A100")]) // A列のみ色付け
+    .build();
   rules.push(ruleProcessGroup);
+
   sheetTaskDB.setConditionalFormatRules(rules);
 
   sheetTaskDB.setFrozenRows(1);
   sheetTaskDB.setFrozenColumns(4);
 
-  // ==========================================
-  // 6. Dashboard シート設定
-  // ==========================================
-  sheetDashboard.getRange("A1").setValue("【リソース負荷状況】(未完了タスクの工数合計)");
+  // --- Dashboard ---
+  sheetDashboard.getRange("A1").setValue("【リソース負荷状況】");
   sheetDashboard.getRange("A2").setFormula('=QUERY(Task_DB!E:G, "select E, sum(G) where F != \'🟢 完了\' and E is not null group by E label sum(G) \'残工数(h)\'", 1)');
-
   sheetDashboard.getRange("D1").setValue("【設定】Google Chat Webhook URL");
-  sheetDashboard.getRange("D2").setBackground("#fff2cc").setValue("");
+  sheetDashboard.getRange("D2").setBackground("#fff2cc");
 
-  sheetDashboard.getRange("D4").setValue("【KPI】期限切れタスク数");
-  sheetDashboard.getRange("D5").setFormula('=COUNTIFS(Task_DB!I:I, "<"&TODAY(), Task_DB!F:F, "<>🟢 完了")');
-  sheetDashboard.getRange("D5").setFontColor("red").setFontWeight("bold").setFontSize(14);
-
-  // ==========================================
-  // 7. 不要シートの掃除
-  // ==========================================
-  // 作成した4シート以外（元々あった「シート1」など）を削除
-  const createdSheetNames = Object.values(targetSheets);
-  const allSheets = ss.getSheets();
-  
-  if (allSheets.length > createdSheetNames.length) {
-    allSheets.forEach(sheet => {
-      if (!createdSheetNames.includes(sheet.getName())) {
-        try {
-          ss.deleteSheet(sheet);
-        } catch (e) {
-          // 削除エラー（最後の1枚など）は無視
-          console.log("シート削除スキップ: " + sheet.getName());
-        }
-      }
-    });
-  }
-
-  // Dashboardをアクティブにする
-  ss.setActiveSheet(sheetDashboard);
-  Browser.msgBox("✅ シート構築が完了しました！");
+  Logger.log("URL: " + ss.getUrl());
 }
