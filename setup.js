@@ -1,18 +1,26 @@
 /**
- * 【v2.1】クオーレ様向けタスク管理ツール構築 (本格ガントチャート版)
- * K列以降に日付を展開し、条件付き書式で期間を塗りつぶします。
+ * 【v2.3】クオーレ様向けタスク管理ツール (列構成修正版)
+ * A-J: タスク情報
+ * K  : Group_ID (計算用・非表示)
+ * L~ : ガントチャート
  */
-function createV2DemoSheet_Gantt() {
-  const ss = SpreadsheetApp.create("【デモv2.1】クオーレ様タスク管理ツール_ガントチャート版");
+function createV2DemoSheet_Corrected() {
+  const ss = SpreadsheetApp.create("【デモv2.3】クオーレ様タスク管理ツール_列修正版");
   const defaultSheet = ss.getSheets()[0];
 
   const sheetDashboard = ss.insertSheet("Dashboard");
   const sheetTaskDB = ss.insertSheet("Task_DB");
   const sheetProcessDB = ss.insertSheet("Process_DB");
+  const sheetDropdowns = ss.insertSheet("Dropdowns");
   
   ss.deleteSheet(defaultSheet);
 
-  // --- Process_DB 設定 ---
+  // --- Dropdowns ---
+  sheetDropdowns.getRange("A1").setValue("【担当者リスト】").setFontWeight("bold").setBackground("#d9ead3");
+  const initialAssignees = [["本田 啓夫"], ["佐藤 料理長"], ["鈴木 買出"], ["AI アシスタント"]];
+  sheetDropdowns.getRange(2, 1, initialAssignees.length, 1).setValues(initialAssignees);
+
+  // --- Process_DB ---
   const processHeaders = ["Process_ID", "Process_Name", "Description"];
   const processData = [
     ["P-01", "買出し", "食材や備品の調達フェーズ"],
@@ -30,11 +38,16 @@ function createV2DemoSheet_Gantt() {
     "Assignee", "Status", "Est_Hours", "Start_Date", "Due_Date", "Notify"
   ];
   
-  // 固定列のヘッダーセット
   sheetTaskDB.getRange(1, 1, 1, fixedHeaders.length).setValues([fixedHeaders])
     .setFontWeight("bold").setBackground("#4c1130").setFontColor("white");
   
-  // ★変更点：K列以降に「日付ヘッダー」を展開 (今日から60日分)
+  // ★変更点1：K列を計算用列に設定
+  sheetTaskDB.getRange("K1").setValue("Group_ID");
+  // 数式：A列(Process_ID)がユニークリストの何番目か
+  sheetTaskDB.getRange("K2").setFormula('=ARRAYFORMULA(IF(A2:A="", "", MATCH(A2:A, UNIQUE(A2:A), 0)))');
+  sheetTaskDB.hideColumns(11); // K列を隠す
+
+  // ★変更点2：L列(12列目)以降をガントチャートに設定
   const today = new Date();
   const dateHeaders = [];
   for (let i = 0; i < 60; i++) {
@@ -42,56 +55,33 @@ function createV2DemoSheet_Gantt() {
     d.setDate(today.getDate() + i);
     dateHeaders.push(d);
   }
-  // K1セルから日付を書き込み
-  sheetTaskDB.getRange(1, 11, 1, dateHeaders.length) // 11列目(K列)から
+  sheetTaskDB.getRange(1, 12, 1, dateHeaders.length) // 12列目から書き込み
     .setValues([dateHeaders])
-    .setNumberFormat("M/d") // 日付フォーマット
+    .setNumberFormat("M/d")
     .setBackground("#f3f3f3")
     .setFontColor("black")
     .setFontWeight("bold")
     .setHorizontalAlignment("center");
 
-  // 列幅調整
-  sheetTaskDB.setColumnWidth(4, 250); // Task_Name
-  sheetTaskDB.setColumnWidths(11, 60, 25); // ガントチャートエリアを狭く(25px)して見やすく
+  // 列幅
+  sheetTaskDB.setColumnWidth(4, 250);
+  sheetTaskDB.setColumnWidths(12, 60, 25); // L列以降を狭く
 
-  // --- 入力規則 ---
-  const demoAssignees = ["本田 啓夫", "佐藤 料理長", "鈴木 買出", "AI アシスタント"];
-  const ruleAssignee = SpreadsheetApp.newDataValidation().requireValueInList(demoAssignees).setAllowInvalid(true).build();
+  // 入力規則
+  const ruleAssignee = SpreadsheetApp.newDataValidation().requireValueInRange(sheetDropdowns.getRange("A2:A")).setAllowInvalid(true).build();
   sheetTaskDB.getRange("E2:E100").setDataValidation(ruleAssignee);
-
   const ruleStatus = SpreadsheetApp.newDataValidation().requireValueInList(["⚪️ 未着手", "🔵 進行中", "🟢 完了", "🟡 確認待ち"]).setAllowInvalid(true).build();
   sheetTaskDB.getRange("F2:F100").setDataValidation(ruleStatus);
-
   const ruleCheck = SpreadsheetApp.newDataValidation().requireCheckbox().build();
   sheetTaskDB.getRange("J2:J100").setDataValidation(ruleCheck);
 
-  // --- 数式 ---
+  // 数式 (C列)
   sheetTaskDB.getRange("C2").setFormula('=ARRAYFORMULA(IFERROR(VLOOKUP(A2:A, Process_DB!A:B, 2, FALSE), ""))');
 
-  // --- 条件付き書式 (ガントチャートの描画) ---
+  // --- 条件付き書式 ---
   const rules = sheetTaskDB.getConditionalFormatRules();
 
-  // 1. ガントチャートバー (期間塗りつぶし)
-  // 範囲: K2:BM100 (日付エリア)
-  // 条件: カレンダーの日付(K$1)が、開始日($H2)以上 かつ 期限($I2)以下 の場合
-  const ganttRange = sheetTaskDB.getRange(2, 11, 100, 60);
-  const ruleGantt = SpreadsheetApp.newConditionalFormatRule()
-    .whenFormulaSatisfied('=AND(K$1>=$H2, K$1<=$I2)')
-    .setBackground("#6aa84f") // 緑色
-    .setRanges([ganttRange])
-    .build();
-  rules.push(ruleGantt);
-
-  // 2. 今日線 (縦ライン)
-  const ruleToday = SpreadsheetApp.newConditionalFormatRule()
-    .whenFormulaSatisfied('=K$1=TODAY()')
-    .setBackground("#fff2cc") // 薄い黄色
-    .setRanges([ganttRange])
-    .build();
-  rules.push(ruleToday);
-
-  // 3. 完了行グレーアウト (全体)
+  // 1. 完了行グレーアウト
   const ruleGray = SpreadsheetApp.newConditionalFormatRule()
     .whenFormulaSatisfied('=$F2="🟢 完了"')
     .setBackground("#EFEFEF")
@@ -100,13 +90,33 @@ function createV2DemoSheet_Gantt() {
     .build();
   rules.push(ruleGray);
 
-  // 4. プロセス区切り
-  const ruleProcessGroup = SpreadsheetApp.newConditionalFormatRule()
-    .whenFormulaSatisfied('=$A2<>$A1')
-    .setBackground("#e6b8af") // 少し濃い色で区切り
-    .setRanges([sheetTaskDB.getRange("A2:A100")]) // A列のみ色付け
+  // 2. プロセスごとの色分け (A~D列)
+  // ★修正：K列($K2)を参照して奇数判定
+  const rangeProcessCols = sheetTaskDB.getRange("A2:D100");
+  const rulePink = SpreadsheetApp.newConditionalFormatRule()
+    .whenFormulaSatisfied('=ISODD($K2)') 
+    .setBackground("#EAD1DC") // ピンク
+    .setRanges([rangeProcessCols])
     .build();
-  rules.push(ruleProcessGroup);
+  rules.push(rulePink);
+
+  // 3. ガントチャートバー
+  // ★修正：日付はL$1から、範囲はL2から
+  const ganttRange = sheetTaskDB.getRange(2, 12, 100, 60); // L列から
+  const ruleGantt = SpreadsheetApp.newConditionalFormatRule()
+    .whenFormulaSatisfied('=AND(L$1>=$H2, L$1<=$I2)')
+    .setBackground("#6aa84f")
+    .setRanges([ganttRange])
+    .build();
+  rules.push(ruleGantt);
+
+  // 4. 今日線
+  const ruleToday = SpreadsheetApp.newConditionalFormatRule()
+    .whenFormulaSatisfied('=L$1=TODAY()')
+    .setBackground("#fff2cc")
+    .setRanges([ganttRange])
+    .build();
+  rules.push(ruleToday);
 
   sheetTaskDB.setConditionalFormatRules(rules);
 
