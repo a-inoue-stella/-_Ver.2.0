@@ -160,3 +160,48 @@ function createV2DemoSheet_Japanese() {
   ss.setActiveSheet(sheetTaskDB);
   Browser.msgBox("✅ 日本語版シートを作成しました");
 }
+
+/**
+ * 【v2.5追加】ダッシュボードに「リソース負荷グラフ」を自動生成する
+ * ・集計表を「ステータス別（ピボット）」にアップグレード
+ * ・積み上げ棒グラフを作成して配置
+ */
+function setupDashboardChart() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(CONFIG.SHEET_DASHBOARD);
+  
+  // 1. 集計用数式のアップグレード (pivot F を追加してステータス別に分解)
+  // 元: select E, sum(G) ... group by E
+  // 新: select E, sum(G) ... group by E pivot F
+  const queryFormula = `=QUERY('${CONFIG.SHEET_TASK}'!E:G, "select E, sum(G) where F != '🟢 完了' and E is not null group by E pivot F", 1)`;
+  sheet.getRange("A2").setFormula(queryFormula);
+  
+  // 2. 既存のグラフがあれば削除 (重複防止)
+  const charts = sheet.getCharts();
+  for (const chart of charts) {
+    sheet.removeChart(chart);
+  }
+
+  // 3. グラフのデータ範囲を特定
+  // A2を起点にデータが入っている範囲を取得
+  const lastRow = sheet.getLastRow();
+  const lastCol = sheet.getLastColumn();
+  // データがまだない(ヘッダーのみ)場合はA2:C2などを仮定
+  const dataRange = sheet.getRange(2, 1, lastRow - 1 || 1, lastCol || 2);
+
+  // 4. 積み上げ棒グラフの作成
+  const chartBuilder = sheet.newChart()
+    .asColumnChart()
+    .addRange(dataRange)
+    .setPosition(5, 1, 0, 0) // A5セルの位置に配置
+    .setStacked() // 積み上げに設定
+    .setOption('title', '担当者別 リソース負荷状況 (残工数 h)')
+    .setOption('legend', {position: 'top'})
+    .setOption('hAxis', {title: '担当者'})
+    .setOption('vAxis', {title: '工数 (時間)'})
+    .setOption('colors', ['#cccccc', '#4285f4', '#fbbc04', '#ea4335']); // 色設定(適宜)
+
+  sheet.insertChart(chartBuilder.build());
+  
+  Browser.msgBox("✅ ダッシュボードにグラフを追加しました！");
+}
