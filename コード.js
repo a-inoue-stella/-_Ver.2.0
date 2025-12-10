@@ -197,7 +197,7 @@ function processAiPlan(jsonString) {
    機能2: 通知トリガー (チェックボックスONで通知)
    ========================================================================== */
 
-function onEdit(e) {
+function onCheck(e) {
   const range = e.range;
   const sheet = range.getSheet();
 
