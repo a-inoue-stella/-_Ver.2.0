@@ -22,7 +22,7 @@ const CONFIG = {
   COL_DUE: 9,
   COL_NOTIFY: 10,   
   
-  CELL_WEBHOOK: 'D2'
+  CELL_WEBHOOK: 'E2'
 };
 
 /**
