@@ -90,7 +90,8 @@ function openImportModal() {
 }
 
 /**
- * 1-2. JSON解析とDBへの書き込み (ガントチャート対応版)
+ * 1-2. JSON解析とDBへの書き込み (サーバー側処理)
+ * ★修正版：日付から時間情報を削除 (00:00:00化) して書き込む
  */
 function processAiPlan(jsonString) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -101,24 +102,38 @@ function processAiPlan(jsonString) {
     const planData = JSON.parse(jsonString);
     if (!Array.isArray(planData)) throw new Error("JSONは配列形式である必要があります");
 
-    // --- A. Process_DB 更新 ---
-    const existProcs = sheetProcess.getRange("A2:A").getValues().flat().filter(String);
+    // --- A. Process_DB の更新 (Insert Only) ---
+    const lastRowP = sheetProcess.getLastRow();
+    const existingIds = new Set();
+    
+    if (lastRowP > 1) {
+      const ids = sheetProcess.getRange(2, 1, lastRowP - 1, 1).getValues().flat();
+      ids.forEach(id => { if(id) existingIds.add(id); });
+    }
+
     const newProcesses = [];
-    const seenProcIds = new Set(existProcs);
+    const seenProcIdsInJson = new Set(); 
 
     planData.forEach(item => {
-      if (item.process_id && !seenProcIds.has(item.process_id)) {
-        newProcesses.push([item.process_id, item.process_name || "", "AI生成"]);
-        seenProcIds.add(item.process_id);
+      const pId = item.process_id;
+      const pName = item.process_name || "";
+
+      if (!pId) return;
+      if (seenProcIdsInJson.has(pId)) return; 
+      seenProcIdsInJson.add(pId);
+
+      if (!existingIds.has(pId)) {
+        newProcesses.push([pId, pName, "AI自動生成(新規)"]);
+        existingIds.add(pId);
       }
     });
 
     if (newProcesses.length > 0) {
-      const lastRowP = sheetProcess.getLastRow();
-      sheetProcess.getRange(lastRowP + 1, 1, newProcesses.length, 3).setValues(newProcesses);
+      const insertRow = sheetProcess.getLastRow() + 1;
+      sheetProcess.getRange(insertRow, 1, newProcesses.length, 3).setValues(newProcesses);
     }
 
-    // --- B. Task_DB 更新 ---
+    // --- B. Task_DB の更新 ---
     const existTaskIds = sheetTask.getRange("B2:B").getValues().flat();
     let maxId = 0;
     existTaskIds.forEach(id => {
@@ -128,38 +143,36 @@ function processAiPlan(jsonString) {
       }
     });
 
-    const newTasksPart1 = []; // A-B列
-    const newTasksPart2 = []; // D-J列
+    const newTasksPart1 = []; 
+    const newTasksPart2 = []; 
 
     planData.forEach((item, i) => {
       const nextId = maxId + i + 1;
       const taskId = 'TASK-' + ('000' + nextId).slice(-3);
       
+      // ★修正ポイント：日付オブジェクトの時間をリセットする
       const today = new Date();
-      const start = new Date(today); // 開始日
-      const due = new Date(today);   // 期限日
+      today.setHours(0, 0, 0, 0); // 時・分・秒・ミリ秒を0にする
+
+      const start = new Date(today);
+      const due = new Date(today);
       
-      // デモ用: start_offsetがあれば開始日をずらす（なければ今日）
-      if (item.start_offset) start.setDate(today.getDate() + item.start_offset);
-      if (item.due_offset) due.setDate(today.getDate() + item.due_offset);
+      if (item.start_offset !== undefined) start.setDate(today.getDate() + item.start_offset);
+      if (item.due_offset !== undefined) due.setDate(today.getDate() + item.due_offset);
 
-      newTasksPart1.push([
-        item.process_id || "",      
-        taskId                      
-      ]);
-
+      newTasksPart1.push([item.process_id || "", taskId]);
       newTasksPart2.push([
         item.task_name || "",       
         item.assignee_name || "",   
         "⚪️ 未着手",                
         item.est_hours || 1,        
-        start,                      
-        due,                        
+        start, // 時間が0:00になったDateオブジェクト
+        due,   // 時間が0:00になったDateオブジェクト
         false                       
       ]);
     });
 
-    // 書き込み位置
+    // 書き込み
     const valsA = sheetTask.getRange("A1:A").getValues().flat();
     let realLastRow = valsA.length;
     while (realLastRow > 0 && valsA[realLastRow - 1] === "") {
@@ -173,7 +186,7 @@ function processAiPlan(jsonString) {
     }
 
     ss.toast(`タスク${newTasksPart1.length}件を取り込みました。`, "🤖 取り込み完了", 5);
-    return `✅ 成功！\nタスク ${newTasksPart1.length}件を追加しました。`;
+    return `✅ 成功！\nタスク ${newTasksPart1.length}件を追加しました。\n(新規プロセス: ${newProcesses.length}件)`;
 
   } catch (e) {
     throw e;
