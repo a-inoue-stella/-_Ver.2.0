@@ -9,7 +9,7 @@ function createV2DemoSheet_Japanese() {
   const targetSheets = {
     dashboard: "ダッシュボード",
     taskDB: "タスク管理",
-    processDB: "工程マスタ",
+    processDB: "プロセスマスタ",
     dropdowns: "担当者リスト"
   };
 

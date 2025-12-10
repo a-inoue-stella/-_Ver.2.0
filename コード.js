@@ -7,7 +7,7 @@
 // ★修正：シート名を日本語版に合わせて変更
 const CONFIG = {
   SHEET_TASK: 'タスク管理',
-  SHEET_PROCESS: '工程マスタ',
+  SHEET_PROCESS: 'プロセスマスタ',
   SHEET_DASHBOARD: 'ダッシュボード',
   
   // 列番号 (A列=1) ※変更なし
@@ -256,7 +256,7 @@ function createCardV2(d) {
       "card": {
         "header": {
           "title": "【タスク通知】" + d.taskName,
-          "subtitle": `工程: ${d.processNameReal} | 工数: ${d.estHours}h`,
+          "subtitle": `プロセス: ${d.processNameReal} | 工数: ${d.estHours}h`,
           "imageUrl": "https://www.gstatic.com/images/icons/material/system/2x/assignment_ind_black_48dp.png",
           "imageType": "CIRCLE"
         },
